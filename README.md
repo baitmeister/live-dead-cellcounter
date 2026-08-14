@@ -5,7 +5,7 @@ cells) in multi-page `.tif` images. Every image must pass an interactive review
 before the program will export CSV results. The source TIFFs are never modified.
 
 **Author:** Hao Li, with GPT-5.6 Sol  
-**License:** [MIT License](LICENSE)
+**License:** [AGPL-3.0 license](LICENSE)
 
 ## Quick start
 
