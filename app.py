@@ -1,10 +1,10 @@
 """napari review app: live threshold/size preview, click-to-edit, CSV export.
 
 Layout
-    Hoechst (total)  blue image layer
-    Calcein (alive)  green image layer, additive blending -> merged view
-    Total cells      cyan points, marker size = measured cell diameter
-    Alive cells      yellow points
+    Hoechst             blue image layer
+    Total cells overlay cyan points, marker size = measured cell diameter
+    Calcein             green image layer, additive blending -> merged view
+    Alive cells overlay yellow points
 
 Every detection slider except spacing is a pure filter over precomputed
 candidates, so preview is instant.  Display has three controlled modes: a
@@ -35,10 +35,42 @@ FIT_MARGIN = 0.02
 
 CHANNELS = ("total", "alive")
 CHANNEL_LABEL = {"total": "Total (Hoechst)", "alive": "Alive (Calcein)"}
-LAYER_NAME = {"total": "Total cells", "alive": "Alive cells"}
-IMAGE_NAME = {"total": "Hoechst (total)", "alive": "Calcein (alive)"}
+LAYER_NAME = {
+    "total": "Total cells overlay",
+    "alive": "Alive cells overlay",
+}
+IMAGE_NAME = {"total": "Hoechst", "alive": "Calcein"}
 POINT_COLOR = {"total": "cyan", "alive": "yellow"}
 IMAGE_CMAP = {"total": "blue", "alive": "green"}
+
+# Napari renders the last layer in its model at the top and reverses that model
+# for the visible layer list.  Keep the requested user-facing order explicit so
+# render-order implementation details do not leak into the UI definition.
+LAYER_LIST_TOP_TO_BOTTOM = (
+    IMAGE_NAME["total"],
+    LAYER_NAME["total"],
+    IMAGE_NAME["alive"],
+    LAYER_NAME["alive"],
+)
+
+# This is also the single source of truth for the reference shown immediately
+# below Napari's layer list. Delete/Backspace are handled by the active Points
+# layer; every other entry is bound on the viewer in ``_bind_keys``.
+SHORTCUT_REFERENCE = (
+    ("q", "Hoechst visibility"),
+    ("w", "Total overlay visibility"),
+    ("e", "Calcein visibility"),
+    ("r", "Alive overlay visibility"),
+    ("1", "Hoechst view"),
+    ("2", "Calcein view"),
+    ("3", "Merged view"),
+    ("Space", "Toggle both overlays"),
+    ("g", "Toggle grid"),
+    ("f", "Fit image"),
+    ("n", "Accept + next"),
+    ("b", "Back"),
+    ("Delete / Backspace", "Remove selected marker"),
+)
 
 LUT_REVIEW = "review"
 LUT_COMPARE = "compare"
@@ -219,6 +251,63 @@ class CellCounter:
         generic_controls.toggleViewAction().setVisible(False)
         self.viewer.window._qt_viewer.layerButtons.hide()
         self.viewer.window._qt_viewer.viewerButtons.hide()
+        self._build_shortcut_reference()
+        self._order_for_overlay()
+
+    def _build_shortcut_reference(self) -> None:
+        """Place the complete app shortcut reference below the layer list."""
+        from qtpy.QtCore import Qt
+        from qtpy.QtWidgets import (
+            QGridLayout, QHBoxLayout, QLabel, QVBoxLayout, QWidget,
+        )
+
+        panel = QWidget()
+        panel.setObjectName("cellCounterShortcutReference")
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(0, 7, 0, 0)
+        layout.setSpacing(4)
+
+        heading = QLabel("Keyboard shortcuts")
+        heading.setStyleSheet("font-weight: bold;")
+        layout.addWidget(heading)
+
+        grid = QGridLayout()
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setHorizontalSpacing(7)
+        grid.setVerticalSpacing(2)
+
+        # Two compact columns keep the full list visible without squeezing the
+        # four layer rows out of the standard left dock.
+        compact_shortcuts = SHORTCUT_REFERENCE[:-1]
+        rows = (len(compact_shortcuts) + 1) // 2
+        for index, (key, description) in enumerate(compact_shortcuts):
+            column_group, row = divmod(index, rows)
+            key_label = QLabel(key)
+            key_label.setAlignment(
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+            )
+            key_label.setStyleSheet("font-weight: bold;")
+            description_label = QLabel(description)
+            grid.addWidget(key_label, row, column_group * 2)
+            grid.addWidget(description_label, row, column_group * 2 + 1)
+            grid.setColumnStretch(column_group * 2 + 1, 1)
+        layout.addLayout(grid)
+
+        # Keep the one long key name on its own row so it does not widen and
+        # squeeze either compact column above it.
+        key, description = SHORTCUT_REFERENCE[-1]
+        final_row = QHBoxLayout()
+        final_row.setContentsMargins(0, 0, 0, 0)
+        final_row.setSpacing(7)
+        key_label = QLabel(key)
+        key_label.setStyleSheet("font-weight: bold;")
+        final_row.addWidget(key_label)
+        final_row.addWidget(QLabel(description), 1)
+        layout.addLayout(final_row)
+
+        layer_list_panel = self.viewer.window._qt_viewer.dockLayerList.widget()
+        layer_list_panel.layout().addWidget(panel)
+        self.shortcut_reference = panel
 
     def _build_controls(self) -> None:
         from magicgui.widgets import (
@@ -567,6 +656,26 @@ class CellCounter:
     def _bind_keys(self) -> None:
         v = self.viewer
 
+        # q/w are unused by Napari. e/r are context-specific defaults for
+        # Labels/Shapes editing, layer types this controlled viewer never
+        # creates. These viewer bindings therefore have no functional conflict
+        # with this app's Image and Points layers.
+        @v.bind_key("q", overwrite=True)
+        def toggle_hoechst(_):
+            self._toggle_layer_visibility(IMAGE_NAME["total"])
+
+        @v.bind_key("w", overwrite=True)
+        def toggle_total_overlay(_):
+            self._toggle_layer_visibility(LAYER_NAME["total"])
+
+        @v.bind_key("e", overwrite=True)
+        def toggle_calcein(_):
+            self._toggle_layer_visibility(IMAGE_NAME["alive"])
+
+        @v.bind_key("r", overwrite=True)
+        def toggle_alive_overlay(_):
+            self._toggle_layer_visibility(LAYER_NAME["alive"])
+
         @v.bind_key("1", overwrite=True)
         def solo_total(_):
             self._set_channel_view(VIEW_HOECHST)
@@ -599,6 +708,11 @@ class CellCounter:
         @v.bind_key("f", overwrite=True)
         def fit(_):
             self._fit_view()
+
+    def _toggle_layer_visibility(self, name: str) -> None:
+        """Toggle exactly one layer, matching its eye control in the list."""
+        layer = self.viewer.layers[name]
+        layer.visible = not layer.visible
 
     def _install_trackpad_zoom(self) -> None:
         """Handle macOS native pinch events directly on the image canvas.
@@ -693,14 +807,16 @@ class CellCounter:
             self._set_warning(f"grid mode unavailable: {exc}")
 
     def _order_for_overlay(self) -> None:
-        """Images beneath, points on top, so markers are never hidden."""
-        self._reorder([IMAGE_NAME["total"], IMAGE_NAME["alive"],
-                       LAYER_NAME["total"], LAYER_NAME["alive"]])
+        """Restore the requested top-to-bottom order in the layer list."""
+        self._reorder_top_to_bottom(LAYER_LIST_TOP_TO_BOTTOM)
 
     def _order_for_grid(self) -> None:
-        """Each image next to its own overlay, so grid squares pair up."""
-        self._reorder([IMAGE_NAME["total"], LAYER_NAME["total"],
-                       IMAGE_NAME["alive"], LAYER_NAME["alive"]])
+        """Keep each image adjacent to its overlay in the requested order."""
+        self._reorder_top_to_bottom(LAYER_LIST_TOP_TO_BOTTOM)
+
+    def _reorder_top_to_bottom(self, names: tuple[str, ...]) -> None:
+        """Translate visible layer-list order to Napari's reversed model."""
+        self._reorder(list(reversed(names)))
 
     def _reorder(self, names: list[str]) -> None:
         for target, name in enumerate(names):
@@ -781,6 +897,10 @@ class CellCounter:
         self._draw_lut_histogram()
 
         self.refresh()
+        # Replacing a Points layer's data makes Napari fall back to pan/zoom.
+        # Reset our mode buttons after that replacement so the highlighted
+        # button always describes what the next canvas interaction will do.
+        self._activate_pan_zoom()
         self._prefetch(self.index + 1)
 
     # --- interaction -----------------------------------------------------
@@ -1264,7 +1384,6 @@ def main(folder: str | Path | None = None) -> None:
     import napari
 
     counter = CellCounter(Path(folder) if folder else Path.cwd())
-    counter._order_for_overlay()
     napari.run()
 
 

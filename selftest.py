@@ -20,6 +20,8 @@ import numpy as np
 from . import detect, export
 from .app import (
     CellCounter,
+    LAYER_LIST_TOP_TO_BOTTOM,
+    SHORTCUT_REFERENCE,
     _apply_pinch_zoom,
     _as_points,
     _fit_viewer,
@@ -54,6 +56,24 @@ class _StubLayer:
 
     def refresh(self) -> None:
         self.refreshes += 1
+
+
+class _StubNamedLayer:
+    def __init__(self, name: str):
+        self.name = name
+        self.visible = True
+
+
+class _StubLayerList(list):
+    """Minimal name-addressable, movable stand-in for Napari's LayerList."""
+
+    def __getitem__(self, item):
+        if isinstance(item, str):
+            return next(layer for layer in self if layer.name == item)
+        return super().__getitem__(item)
+
+    def move(self, current: int, target: int) -> None:
+        self.insert(target, self.pop(current))
 
 
 def _stub_counter(file_data: detect.FileData) -> CellCounter:
@@ -492,6 +512,41 @@ def test_helpers() -> None:
           "RAW display must use the full native uint16 range")
     check(_raw_display_limits(np.array([[2.0, 5.0]])) == (2.0, 5.0),
           "RAW display must use the native range for floating-point images")
+
+    counter = CellCounter.__new__(CellCounter)
+    layers = _StubLayerList(
+        _StubNamedLayer(name) for name in reversed(LAYER_LIST_TOP_TO_BOTTOM)
+    )
+    counter.viewer = SimpleNamespace(layers=layers)
+    # Scramble the model, then verify that the visible (reversed) Napari list
+    # has the exact requested order after restoration.
+    layers.move(0, 2)
+    counter._order_for_overlay()
+    visible_order = tuple(layer.name for layer in reversed(layers))
+    check(visible_order == LAYER_LIST_TOP_TO_BOTTOM,
+          f"layer-list order is wrong: {visible_order}")
+    before = layers[LAYER_LIST_TOP_TO_BOTTOM[0]].visible
+    counter._toggle_layer_visibility(LAYER_LIST_TOP_TO_BOTTOM[0])
+    check(layers[LAYER_LIST_TOP_TO_BOTTOM[0]].visible is not before,
+          "single-layer visibility shortcut must toggle exactly its layer")
+    shortcut_keys = [key.casefold() for key, _description in SHORTCUT_REFERENCE]
+    check(len(shortcut_keys) == len(set(shortcut_keys)),
+          "shortcut reference contains conflicting duplicate keys")
+    check(shortcut_keys[:4] == ["q", "w", "e", "r"],
+          "layer visibility shortcuts must be q/w/e/r in layer-list order")
+
+    mode_counter = CellCounter.__new__(CellCounter)
+    mode_counter.points = {
+        "total": SimpleNamespace(mode="add"),
+        "alive": SimpleNamespace(mode="select"),
+    }
+    highlighted_modes = []
+    mode_counter._set_manual_mode_button = highlighted_modes.append
+    mode_counter._activate_pan_zoom()
+    check(highlighted_modes == ["pan"],
+          "pan/zoom activation must restore the default button highlight")
+    check(all(layer.mode == "pan_zoom" for layer in mode_counter.points.values()),
+          "pan/zoom activation must reset both point-layer modes")
     print("  helpers OK")
 
 

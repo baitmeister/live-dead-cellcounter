@@ -34,9 +34,10 @@ cd "/path/to/image-folder"
 The program discovers `.tif` and `.tiff` files case-insensitively.
 
 The first pending image opens centered with the complete field fitted in the
-viewer. Hoechst is blue, Calcein is green, total-cell markers are cyan, and
-live-cell markers are yellow. Each marker is drawn at the candidate's measured
-diameter.
+viewer. The layer list is ordered **Hoechst / Total cells overlay / Calcein /
+Alive cells overlay** from top to bottom. Hoechst is blue, Calcein is green,
+total-cell markers are cyan, and live-cell markers are yellow. Each marker is
+drawn at the candidate's measured diameter.
 
 ## Panel map
 
@@ -151,7 +152,8 @@ the total count. Qualifying Calcein candidates without a unique nucleus within
 - **Pan / zoom:** returns the mouse to navigation mode.
 
 The active manual mode stays highlighted in blue. The highlight therefore shows
-what the next canvas click will do; choose **Pan / zoom** when you finish editing.
+what the next canvas click will do. Opening another TIFF resets both the active
+mode and its highlight to **Pan / zoom**.
 
 A manually added live point is subject to the same 30 px unique-association rule
 as an automatic Calcein candidate. If both the nucleus and Calcein signal were
@@ -181,8 +183,29 @@ using **< Back** never accepts the current image.
 
 ### Keyboard and trackpad
 
-`1` Hoechst · `2` Calcein · `3` Merged · `Space` toggle markers · `g` grid ·
-`f` center/fit · `n` accept and next · `b` back
+The complete shortcut reference is also shown in the left panel directly below
+the layer list.
+
+| Key | Action |
+|---|---|
+| `q` | Toggle Hoechst layer visibility. |
+| `w` | Toggle total-cells overlay visibility. |
+| `e` | Toggle Calcein layer visibility. |
+| `r` | Toggle alive-cells overlay visibility. |
+| `1` | Show Hoechst and its overlay. |
+| `2` | Show Calcein and its overlay. |
+| `3` | Show the merged channels and both overlays. |
+| `Space` | Toggle both cell overlays. |
+| `g` | Toggle the side-by-side grid. |
+| `f` | Center and fit the complete image. |
+| `n` | Accept the current file and open the next pending file. |
+| `b` | Go back without accepting. |
+| `Delete` / `Backspace` | Remove a selected marker in a select/remove mode. |
+
+The four layer visibility keys do not conflict with another active shortcut in
+this app. Napari reserves `e` and `r` for editing Labels and Shapes layers, but
+this controlled viewer only creates Image and Points layers, so those
+context-specific bindings are never active here.
 
 Press `3` before `g` if you want both channels visible in the side-by-side grid.
 Pinch-to-zoom on a macOS trackpad and mouse-wheel zoom are supported. Use `f` if
